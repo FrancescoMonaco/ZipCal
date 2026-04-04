@@ -1,4 +1,5 @@
 # Frequency Matters: Fast Model-Agnostic Data Curation for Pruning and Quantization
+[![arXiv](https://img.shields.io/badge/arXiv-2603.16105-b31b1b.svg)](https://arxiv.org/abs/2603.16105)
 
 ## Introduction
 Code for the paper "**Frequency Matters: Fast Model-Agnostic Data Curation for Pruning and Quantization**".

@@ -6,7 +6,8 @@ Code for the paper "**Frequency Matters: Fast Model-Agnostic Data Curation for P
 
 ## Reproducibility
 ### Environment Setup
-The recreate the environment one could use the `requirements.txt` file with `pip`:
+The code has been developed using Python 3.12.3.
+To recreate the environment one could use the `requirements.txt` file with `pip`:
 
 ```bash
 pip install -r requirements.txt
@@ -19,10 +20,21 @@ conda env create -f environment.yml
 ```
 
 This will set up all necessary dependencies and tools required for the project.
+**Remark**: some models and/or datasets may need an access token or be gated from the `transformers` and `datasets` libraries, on-screen instructions will guide you in the process of obtaining access to the resources.
 
 ### Running the experiments
-To run the experiments, you can use the provided slurm scripts in the `launch` directory (\*.slurm). Check carefully the parameters for requesting the right resources for the experiments.
-For the main experiments we also provide bash scripts that can be used on a local machine (\*.sh).
+To run the experiments, you can use the provided slurm scripts in the `launch` directory (\*.slurm). Check carefully the parameters for requesting the right resources for the experiments. To launch with slurm the experiment `name_experiment` run:
+```bash
+srun launch\name_experiment.slurm
+```
+For the main experiments we also provide bash scripts that can be used on a local machine (\*.sh). To run these files:
+```bash
+chmod +x launch\name_experiment.sh
+bash launch\name_experiment.sh
+```
+
+### Acknowledgments
+Our codebase extensively uses the [COLA](https://github.com/BokwaiHo/COLA) repository as a comparison baseline Ho et al. 2025,  and [2SSP](https://github.com/FabrizioSandri/2SSP) as a structured pruning technique Sandri et al. 2025.
 
 ### Recreating the tables and figures
 To recreate the tables and figures one could use the python scripts provided in the `plot` directory. Figures will be saved in the `plots` directory, while tables will be saved in the `results\tables` directory.

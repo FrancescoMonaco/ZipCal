@@ -34,8 +34,8 @@ chmod +x launch\name_experiment.sh
 bash launch\name_experiment.sh
 ```
 
-### Acknowledgments
-Our codebase extensively uses the [COLA](https://github.com/BokwaiHo/COLA) repository as a comparison baseline Ho et al. 2025,  and [2SSP](https://github.com/FabrizioSandri/2SSP) as a structured pruning technique Sandri et al. 2025.
-
 ### Recreating the tables and figures
-To recreate the tables and figures one could use the python scripts provided in the `plot` directory. Figures will be saved in the `plots` directory, while tables will be saved in the `results\tables` directory.
+To recreate the tables and figures one could use the python scripts provided in the `plot` directory with `python <name_plot>.py`. Figures will be saved in the `plots` directory, while tables will be saved in the `results\tables` directory as both Markdown previews and LaTeX snippets.
+
+### Acknowledgments
+Our codebase extensively uses the [COLA](https://github.com/BokwaiHo/COLA) repository as a comparison baseline Ho et al. 2025,  and [2SSP](https://github.com/FabrizioSandri/2SSP) as a structured pruning technique Sandri et al. 2025. Moreover we base our test framework on [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness) and [llm-compressor](https://github.com/vllm-project/llm-compressor).

@@ -21,6 +21,33 @@ except ImportError:
     _VLLM_AVAILABLE = False
 
 
+def _is_accelerate_dispatched(model):
+    """Return True when the model is loaded with accelerate device dispatch/offload."""
+    device_map = getattr(model, "hf_device_map", None)
+    if not device_map:
+        return False
+
+    if not isinstance(device_map, dict):
+        return True
+
+    mapped_devices = {str(v) for v in device_map.values()}
+    if {"cpu", "disk", "meta"} & mapped_devices:
+        return True
+    return len(mapped_devices) > 1
+
+
+def _safe_move_model(model, device):
+    """Move model only when legal; skip for accelerate-dispatched/offloaded models."""
+    if _is_accelerate_dispatched(model):
+        log.info("Model uses accelerate dispatch/offload; skipping explicit model.to()/cpu() moves.")
+        return model
+    try:
+        return model.to(device)
+    except Exception as e:
+        log.warning(f"Could not move model to {device}: {e}")
+        return model
+
+
 def _model_supports_system_role(tokenizer):
     """Check if the model's chat template supports the system role."""
     try:
@@ -38,7 +65,7 @@ def _model_supports_system_role(tokenizer):
 
 def _run_hflm_eval(model, tokenizer, tasks, system_instruction, device):
     """Run evaluation using HuggingFace LM backend."""
-    hflm_model = HFLM(pretrained=model, tokenizer=tokenizer, batch_size="auto")
+    hflm_model = HFLM(pretrained=model, tokenizer=tokenizer, batch_size="auto", dtype="bfloat16")
     results = simple_evaluate(
         model=hflm_model,
         tasks=tasks,
@@ -66,14 +93,15 @@ def _run_vllm_eval(model, tokenizer, tasks, system_instruction, device):
         model.save_pretrained(tmpdir)
         tokenizer.save_pretrained(tmpdir)
 
-        # Free GPU memory from HF model before vLLM loads it
-        model.cpu()
-        torch.cuda.empty_cache()
+        # Free some memory before vLLM loads weights from disk.
+        # Do not call model.cpu()/model.to() when accelerate dispatch is active.
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         log.info(f"Loading model in vLLM for generative tasks: {tasks}")
         vllm_model = VLLM(
             pretrained=tmpdir,
-            dtype="float16",
+            dtype="bfloat16",
             gpu_memory_utilization=0.85,
             max_model_len=4096,
             trust_remote_code=True,
@@ -100,7 +128,7 @@ def _run_vllm_eval(model, tokenizer, tasks, system_instruction, device):
             hflm_model = HFLM(
                 pretrained=tmpdir,
                 tokenizer=tokenizer,
-                dtype="float16",
+                dtype="bfloat16",
                 batch_size="auto",
             )
             results = simple_evaluate(
@@ -111,14 +139,13 @@ def _run_vllm_eval(model, tokenizer, tasks, system_instruction, device):
                 check_integrity=False,
             )
             del hflm_model
-            torch.cuda.empty_cache()
-            # Restore original model to GPU for any subsequent use
-            model.to(device)
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             return results
         except Exception as e2:
             log.warning(f"HFLM fallback also failed: {e2}. Giving up on generative tasks.")
-            torch.cuda.empty_cache()
-            model.to(device)
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             return None
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -151,11 +178,11 @@ def evaluate_model(
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Ensure model is on the correct device
+    # Ensure model is on the correct device when this is legal.
     try:
         if model.device.type != device:
             log.info(f"Moving model to {device}...")
-            model = model.to(device)
+            model = _safe_move_model(model, device)
     except AttributeError:
         pass  # sharded / device_map models
 
@@ -196,7 +223,7 @@ def evaluate_model(
             # Move model back to GPU if it was offloaded
             try:
                 if model.device.type != device:
-                    model.to(device)
+                    model = _safe_move_model(model, device)
             except AttributeError:
                 pass
             gen_results = _run_hflm_eval(model, tokenizer, gen_tasks, system_instruction, device)

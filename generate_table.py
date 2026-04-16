@@ -39,8 +39,8 @@ import pandas as pd
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 SCRIPT_DIR    = Path(__file__).resolve().parent
-COLA_CSV      = SCRIPT_DIR / "results" / "cola_experiments.csv"
-EXP_CSV       = SCRIPT_DIR / "results" / "experiment_results_new.csv"
+COLA_CSV      = SCRIPT_DIR / "results" / "cola_experiments_multilingual.csv"
+EXP_CSV       = SCRIPT_DIR / "results" / "experiments_multilingual.csv"
 COLA_2SSP_CSV = SCRIPT_DIR / "results" / "2ssp_cola_experiment_results.csv"
 EXP_2SSP_CSV  = SCRIPT_DIR / "results" / "2ssp_experiment_results.csv"
 
@@ -48,35 +48,51 @@ EXP_2SSP_CSV  = SCRIPT_DIR / "results" / "2ssp_experiment_results.csv"
 METRIC_ACC_NORM = "acc_norm,none"
 METRIC_ACC      = "acc,none"
 METRIC_GSM8K    = "exact_match,flexible-extract"
+METRIC_XQUAD      = "f1,none"
 
 TASKS_WITH_NORM = {"arc_challenge", "arc_easy", "hellaswag", "openbookqa"}
 
 # Evaluation tasks (rows)
 EVAL_TASKS = [
-    "arc_challenge", "arc_easy", "boolq", "hellaswag",
-    "winogrande", "gsm8k", "mmlu", "openbookqa", "rte", "anli_r1",
+    # "arc_challenge", "arc_easy", "boolq", "hellaswag",
+    # "winogrande", "gsm8k", "mmlu", "openbookqa", "rte", "anli_r1",
+    "global_mmlu_es", "global_mmlu_zh", "xquad_es", "xquad_zh",
+    "xnli_es", "xnli_zh", "xwinograd_zh",
+    "xcopa_zh",
 ]
 
 TASK_DISPLAY = {
-    "arc_challenge": "ARC-C",
-    "arc_easy":      "ARC-E",
-    "boolq":         "BoolQ",
-    "hellaswag":     "HellaSwag",
-    "winogrande":    "WinoGr.",
-    "gsm8k":         "GSM8k",
-    "mmlu":          "MMLU",
-    "openbookqa":    "OBQA",
-    "rte":           "RTE",
-    "anli_r1":       "ANLI",
+    # "arc_challenge": "ARC-C",
+    # "arc_easy":      "ARC-E",
+    # "boolq":         "BoolQ",
+    # "hellaswag":     "HellaSwag",
+    # "winogrande":    "WinoGr.",
+    # "gsm8k":         "GSM8k",
+    # "mmlu":          "MMLU",
+    # "openbookqa":    "OBQA",
+    # "rte":           "RTE",
+    # "anli_r1":       "ANLI",
+    "global_mmlu_es":     "MMLU-ES",
+    "global_mmlu_zh":     "MMLU-ZH",
+    "xquad_es":          "XQuAD-ES",
+    "xquad_zh":          "XQuAD-ZH",
+    "xnli_es":           "XNLI-ES",
+    "xnli_zh":           "XNLI-ZH",
+    "xwinograd_zh":       "XWino-ZH",
+    "xcopa_zh":          "XCOPA-ZH",
 }
 
 # Calibration-dataset groups (columns)
 CALIB_GROUPS = OrderedDict([
-    ("(i)",   ["wikitext", "c4", "pile"]),
-    ("(ii)",  ["gsm8k", "svamp"]),
-    ("(iii)", ["winogrande", "openbookqa"]),
-    ("(iv)",  ["rte", "anli_r1"]),
-    ("(v)",   ["mmlu", "wmt14"]),
+    # ("(i)",   ["wikitext", "c4", "pile"]),
+    # ("(ii)",  ["gsm8k", "svamp"]),
+    # ("(iii)", ["winogrande", "openbookqa"]),
+    # ("(iv)",  ["rte", "anli_r1"]),
+    # ("(v)",   ["mmlu", "wmt14"]),
+    # Multilingual Splits
+    ("(Know-es)", ["global_mmlu_es", "xnli_es", "xquad_es"]),
+    ("(Know-zh)", ["global_mmlu_zh", "xnli_zh", "xquad_zh"]),
+    ("(Comm-zh)", ["xwinograd_zh", "xcopa_zh"]),
 ])
 N_GROUPS = len(CALIB_GROUPS)
 
@@ -85,6 +101,8 @@ N_GROUPS = len(CALIB_GROUPS)
 def _metric_for(task: str) -> str:
     if task == "gsm8k":
         return METRIC_GSM8K
+    if task in {"xquad_es", "xquad_zh"}:
+        return METRIC_XQUAD
     return METRIC_ACC_NORM if task in TASKS_WITH_NORM else METRIC_ACC
 
 
@@ -497,12 +515,12 @@ def main() -> None:
     args = parser.parse_args()
 
     # ── load data ─────────────────────────────────────────────────────────────
-    if args.compression_type == "2ssp":
-        cola_df = pd.read_csv(COLA_2SSP_CSV)
-        exp_df  = pd.read_csv(EXP_2SSP_CSV)
-    else:
-        cola_df = pd.read_csv(COLA_CSV)
-        exp_df  = pd.read_csv(EXP_CSV)
+    # if args.compression_type == "2ssp":
+    #     cola_df = pd.read_csv(COLA_2SSP_CSV)
+    #     exp_df  = pd.read_csv(EXP_2SSP_CSV)
+    # else:
+    cola_df = pd.read_csv(COLA_CSV)
+    exp_df  = pd.read_csv(EXP_CSV)
 
     for m in args.model:
         if m not in exp_df["model"].unique():

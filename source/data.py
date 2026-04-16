@@ -34,6 +34,10 @@ DATASET_MAPPING = {
     "c4": ("allenai/c4", "en"),
     "wikitext": ("wikitext", "wikitext-103-raw-v1"),
     "oscar": ("oscar-corpus/OSCAR-2301", "en"),
+    "oscar_es": ("oscar-corpus/OSCAR-2301", "es"),
+    "oscar_zh": ("oscar-corpus/OSCAR-2301", "zh"),
+    "mc4_es": ("mc4", "es"),
+    "mc4_zh": ("mc4", "zh"),
     # Solo una piccola parte di pile per evitare download enormi
     "pile": ("monology/pile-uncopyrighted", None),
     "gsm8k": ("gsm8k", "main"),
@@ -48,6 +52,12 @@ DATASET_MAPPING = {
     "arc_challenge": ("ai2_arc", "ARC-Challenge"),
     "hellaswag": ("Rowan/hellaswag", None),
     "mmlu": ("cais/mmlu", "all"),
+    "xnli_es": ("xnli", "es"),
+    "xnli_zh": ("xnli", "zh"),
+    "xwinograd_zh": ("Muennighoff/xwinograd", "zh"),
+    "xcopa_zh": ("xcopa", "zh"),
+    "xquad_es": ("xquad", "xquad.es"),
+    "xquad_zh": ("xquad", "xquad.zh"),
 }
 
 
@@ -55,7 +65,11 @@ def get_text_from_item(item, dataset_name):
     """
     Extract text from a dataset item based on the dataset name.
     """
+    base_name = dataset_name.split("_", 1)[0]
+
     if dataset_name in ["c4", "oscar", "redpajama", "pile", "mbpp"]:
+        return item.get("text", "")
+    elif base_name in ["oscar", "mc4"]:
         return item.get("text", "")
     elif dataset_name == "gsm8k":
         return item.get("question", "")
@@ -63,7 +77,7 @@ def get_text_from_item(item, dataset_name):
         return item.get("Body", "") + " " + item.get("Question", "")
     elif dataset_name == "mawps":
         return item.get("sQuestion", "")
-    elif dataset_name in ["anli_r1", "esnli", "rte"]:
+    elif dataset_name in ["anli_r1", "esnli", "rte"] or base_name == "xnli":
         return item.get("premise", "") + " " + item.get("hypothesis", "")
     elif dataset_name == "boolq":
         return item.get("passage", "") + " " + item.get("question", "")
@@ -73,6 +87,18 @@ def get_text_from_item(item, dataset_name):
         return item.get("article", "") + " " + item.get("question", "")
     elif dataset_name == "winogrande":
         return item.get("sentence", "")
+    elif base_name == "xwinograd":
+        return item.get("sentence", "")
+    elif base_name == "xcopa":
+        return (
+            item.get("premise", "")
+            + " "
+            + item.get("choice1", "")
+            + " "
+            + item.get("choice2", "")
+        )
+    elif base_name == "xquad":
+        return item.get("context", "") + " " + item.get("question", "")
     elif dataset_name == "hellaswag":
         return item.get("ctx", "") + " " + item.get("activity_label", "")
     elif dataset_name == "arc_challenge":

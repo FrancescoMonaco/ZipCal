@@ -242,7 +242,6 @@ def main():
             torch_dtype=torch.float16,
             device_map="auto",
             trust_remote_code=True,
-            attn_implementation="flash_attention_2",
         )
 
         # 3. Prepare calibration data for this pruning type

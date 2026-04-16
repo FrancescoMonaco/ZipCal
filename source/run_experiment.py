@@ -27,9 +27,14 @@ logging.basicConfig(level=logging.INFO, format=FORMAT, datefmt=DATE_FORMAT)
 log = logging.getLogger(__name__)
 
 
-def get_completed_experiments(output_csv):
+def get_completed_experiments(output_csv, eval_tasks):
     """Returns a set of (model, compression_type, pruning_type, nsamples, sparsity, calibration_datasets)
-    for which at least one result row already exists in the CSV."""
+    where all requested eval tasks are already present in the CSV.
+
+    Note: For task groups (e.g., mmlu, cmmlu), results may be expanded into
+    subtask names like "mmlu_*". We treat a task as covered if any row has an
+    exact match or a prefix match (task + "_").
+    """
     if not os.path.exists(output_csv):
         return set()
     try:
@@ -37,16 +42,42 @@ def get_completed_experiments(output_csv):
         required_cols = {"model", "compression_type", "pruning_type", "nsamples", "sparsity", "calibration_datasets"}
         if not required_cols.issubset(df.columns):
             return set()
-        return set(
-            zip(
-                df["model"],
-                df["compression_type"],
-                df["pruning_type"],
-                df["nsamples"],
-                df["sparsity"],
-                df["calibration_datasets"],
-            )
+        def _task_covered(available_tasks, requested_task):
+            if requested_task in available_tasks:
+                return True
+            prefix = f"{requested_task}_"
+            return any(t.startswith(prefix) for t in available_tasks)
+
+        completed = set()
+        grouped = (
+            df.groupby(
+                [
+                    "model",
+                    "compression_type",
+                    "pruning_type",
+                    "nsamples",
+                    "sparsity",
+                    "calibration_datasets",
+                ]
+            )["task"]
+            .apply(set)
+            .reset_index()
         )
+
+        for _, row in grouped.iterrows():
+            tasks_in_csv = row["task"]
+            if all(_task_covered(tasks_in_csv, t) for t in eval_tasks):
+                completed.add(
+                    (
+                        row["model"],
+                        row["compression_type"],
+                        row["pruning_type"],
+                        row["nsamples"],
+                        row["sparsity"],
+                        row["calibration_datasets"],
+                    )
+                )
+        return completed
     except Exception as e:
         log.error(f"Error reading completed experiments: {e}")
         return set()
@@ -59,15 +90,25 @@ def get_existing_original_results(output_csv, model_name):
     a different experiment run."""
     results_map = {}  # (task, metric) -> value  — deduplicates automatically
 
-    # Gather candidate CSV files: the target CSV + every CSV in results/
+    # Gather candidate CSV files: the target CSV + every CSV under results/ and
+    # the output CSV's directory (recursively), to maximize cache hits.
     csv_candidates = set()
     if os.path.exists(output_csv):
         csv_candidates.add(output_csv)
-    results_dir = os.path.dirname(output_csv) or "results"
-    if os.path.isdir(results_dir):
-        for fname in os.listdir(results_dir):
-            if fname.endswith(".csv"):
-                csv_candidates.add(os.path.join(results_dir, fname))
+
+    search_roots = set()
+    output_dir = os.path.dirname(output_csv)
+    if output_dir:
+        search_roots.add(output_dir)
+    search_roots.add("results")
+
+    for root in list(search_roots):
+        if not os.path.isdir(root):
+            continue
+        for dirpath, _, filenames in os.walk(root):
+            for fname in filenames:
+                if fname.endswith(".csv"):
+                    csv_candidates.add(os.path.join(dirpath, fname))
 
     for csv_path in csv_candidates:
         try:
@@ -90,6 +131,29 @@ def get_existing_original_results(output_csv, model_name):
         {"task": t, "metric": m, "value": v}
         for (t, m), v in results_map.items()
     ]
+
+
+def _task_covered(available_tasks, requested_task):
+    """Return True if requested_task is present or covered by a group prefix.
+
+    For group tasks like mmlu/cmmlu, results are recorded as subtask names
+    (e.g., mmlu_high_school_physics). We treat those as covering the group.
+    """
+    if requested_task in available_tasks:
+        return True
+    prefix = f"{requested_task}_"
+    return any(t.startswith(prefix) for t in available_tasks)
+
+
+def _task_in_requests(existing_task, requested_tasks):
+    """Return True if an existing task belongs to the requested tasks list.
+
+    This allows group tasks (e.g., requested "mmlu") to match "mmlu_*".
+    """
+    for req in requested_tasks:
+        if existing_task == req or existing_task.startswith(f"{req}_"):
+            return True
+    return False
 
 
 def get_tokenized_data(dataset, tokenizer, dataset_name, max_length=128):
@@ -209,7 +273,7 @@ def main():
 
     # 0. Early exit if all requested experiments already exist in the CSV
     calib_name = "_".join(args.datasets)
-    completed = get_completed_experiments(args.output_csv)
+    completed = get_completed_experiments(args.output_csv, args.eval_tasks)
     remaining_types = [
         t for t in args.pruning_types
         if (args.model, args.compression_type, t, args.nsamples, args.sparsity, calib_name) not in completed
@@ -227,7 +291,9 @@ def main():
     # 2. Evaluate original model once
     existing_orig_metrics = get_existing_original_results(args.output_csv, args.model)
     existing_tasks = set(m["task"] for m in existing_orig_metrics)
-    tasks_to_eval = [t for t in args.eval_tasks if t not in existing_tasks]
+    tasks_to_eval = [
+        t for t in args.eval_tasks if not _task_covered(existing_tasks, t)
+    ]
 
     model = None
     if tasks_to_eval:
@@ -236,23 +302,22 @@ def main():
         )
         model = AutoModelForCausalLM.from_pretrained(
             args.model,
-            torch_dtype=torch.float16,
+            torch_dtype=torch.bfloat16,
             device_map="auto",
             trust_remote_code=True,
-            attn_implementation="flash_attention_2",
         )
         log.info(f"Evaluating original model on: {tasks_to_eval}")
         orig_raw = evaluate_model(args.model, model, tokenizer, tasks_to_eval)
         new_orig_metrics = process_results(orig_raw)
         orig_metrics = [
-            m for m in existing_orig_metrics if m["task"] in args.eval_tasks
+            m for m in existing_orig_metrics if _task_in_requests(m["task"], args.eval_tasks)
         ] + new_orig_metrics
     else:
         log.info(
             f"All tasks {args.eval_tasks} already have original results. Skipping initial evaluation."
         )
         orig_metrics = [
-            m for m in existing_orig_metrics if m["task"] in args.eval_tasks
+            m for m in existing_orig_metrics if _task_in_requests(m["task"], args.eval_tasks)
         ]
 
     # Prepare calibration data base (tokenized) once
@@ -323,7 +388,6 @@ def main():
                 torch_dtype=torch.float16,
                 device_map="auto",
                 trust_remote_code=True,
-                attn_implementation="flash_attention_2",
             )
         else:
             log.info(f"No existing model found at {save_path}. Compressing...")
@@ -334,10 +398,9 @@ def main():
                 )
                 model = AutoModelForCausalLM.from_pretrained(
                     args.model,
-                    torch_dtype=torch.float16,
+                    torch_dtype=torch.bfloat16,
                     device_map="auto",
                     trust_remote_code=True,
-                    attn_implementation="flash_attention_2",
                 )
 
             # Prepare calibration for this specific type
@@ -469,10 +532,9 @@ def main():
             torch.cuda.empty_cache()
             model = AutoModelForCausalLM.from_pretrained(
                 args.model,
-                torch_dtype=torch.float16,
+                torch_dtype=torch.bfloat16,
                 device_map="auto",
                 trust_remote_code=True,
-                attn_implementation="flash_attention_2",
             )
 
     log.info("All experiments finished successfully.")

@@ -1,27 +1,23 @@
 #!/bin/bash
 set -e
 
-MAX_JOBS=2          # Numero di job paralleli (GPU 2-3 per cola.sh)
-GPU_OFFSET=2        # Le GPU 0-1 sono usate da eval.sh
+MAX_JOBS=4          # Numero di job paralleli (GPU 2-3 per cola_multilingual.sh)
+GPU_OFFSET=0        # Le GPU 0-1 sono usate da eval_multilingual.sh
 declare -a PIDS=()  # Tracciamento dei PID in background
 
-# Attende finché uno slot GPU non è libero e restituisce l'indice della GPU libera
 acquire_gpu() {
     while true; do
         for i in "${!PIDS[@]}"; do
             if ! kill -0 "${PIDS[$i]}" 2>/dev/null; then
-                # Slot i è libero
                 unset PIDS[$i]
                 echo "$i"
                 return
             fi
         done
-        # Tutti gli slot sono occupati - attendi un momento e riprova
         sleep 5
     done
 }
 
-# Lancia un job su uno specifico slot GPU in background
 launch_job() {
     local GPU_ID=$1; shift
     local REAL_GPU=$((GPU_ID + GPU_OFFSET))
@@ -30,30 +26,47 @@ launch_job() {
 }
 
 DATASET_PREF="--datasets"
-DATASETS=("winogrande" "arc_challenge" "boolq" "hellaswag" "openbookqa" "rte" "mmlu" "wmt14" "anli_r1" "svamp" "gsm8k" "pile" "wikitext" "c4" "winogrande arc_challenge boolq hellaswag openbookqa rte")
+DATASETS=(
+    "xnli_es"
+    "xquad_es"
+    "xnli_zh"
+    "xwinograd_zh"
+    "xcopa_zh"
+    "xquad_zh"
+)
+
+EVAL_TASKS_PREF="--eval_tasks"
+EVAL_TASKS=(
+    "xnli_es"
+    "xquad_es"
+    "xnli_zh"
+    "xwinograd_zh"
+    "xcopa_zh"
+    "xquad_zh"
+    "global_mmlu_es"
+    "global_mmlu_zh"
+)
+
 MODEL_PREF="--model"
-MODELS=("meta-llama/Llama-3.1-70B-Instruct") #"meta-llama/Llama-3.1-8B-Instruct" "google/gemma-2-9b-it")
+MODELS=("meta-llama/Llama-3.1-8B-Instruct" "google/gemma-2-9b-it")
 NUM_SAMPLES_PREFIX="--nsamples"
 SPARSITY_PREFIX="--sparsity"
 SPARSITY="0.25"
 NUM_SAMPLES=(128)
 COMPRESSION_PREF="--compression_type"
-COMPRESSION_TYPES=("pruning" "quantization" "awq" "2ssp")
+COMPRESSION_TYPES=("2ssp")
 OUTPUT_CSV_PREF="--output_csv"
-OUTPUT_CSV="results/cola_experiments.csv"
+OUTPUT_CSV="results/cola_experiments_multilingual.csv"
 
 mkdir -p logs
 
 TASK_ID=0
-# Gerarchia: Model -> Dataset -> Sample -> Compression
 for MODEL in "${MODELS[@]}"; do
     for DATASET in "${DATASETS[@]}"; do
         for NSAMPLES in "${NUM_SAMPLES[@]}"; do
             for COMPRESSION in "${COMPRESSION_TYPES[@]}"; do
-                
-                # Attendi uno slot GPU libero (si blocca se tutti i MAX_JOBS sono occupati)
+
                 if [[ ${#PIDS[@]} -lt $MAX_JOBS ]]; then
-                    # Trova il primo indice di GPU non utilizzato
                     for ((g=0; g<MAX_JOBS; g++)); do
                         if [[ -z "${PIDS[$g]}" ]] || ! kill -0 "${PIDS[$g]}" 2>/dev/null; then
                             GPU_SLOT=$g
@@ -69,8 +82,8 @@ for MODEL in "${MODELS[@]}"; do
                 echo "Model: $MODEL, Dataset: $DATASET, Samples: $NSAMPLES, Compression: $COMPRESSION"
                 echo "================================================================"
 
-                LOG="logs/cola_task${TASK_ID}_gpu${GPU_SLOT}.log"
-                
+                LOG="logs/cola_multilingual_task${TASK_ID}_gpu${GPU_SLOT}.log"
+
                 launch_job "$GPU_SLOT" \
                     $DATASET_PREF "$DATASET" \
                     $MODEL_PREF "$MODEL" \
@@ -78,15 +91,15 @@ for MODEL in "${MODELS[@]}"; do
                     $SPARSITY_PREFIX "$SPARSITY" \
                     $COMPRESSION_PREF "$COMPRESSION" \
                     $OUTPUT_CSV_PREF "$OUTPUT_CSV" \
+                    $EVAL_TASKS_PREF "${EVAL_TASKS[@]}" \
                     > "$LOG" 2>&1
-                
+
                 TASK_ID=$((TASK_ID + 1))
             done
         done
     done
 done
 
-# Attendi il completamento di tutti i job in background rimanenti
 echo "Waiting for all jobs to finish..."
 wait
 echo "All done."

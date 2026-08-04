@@ -48,6 +48,16 @@ def _safe_move_model(model, device):
         return model
 
 
+def _safe_empty_cuda_cache(context):
+    """Best-effort CUDA cache cleanup that never raises."""
+    if not torch.cuda.is_available():
+        return
+    try:
+        torch.cuda.empty_cache()
+    except Exception as e:
+        log.warning(f"Skipping torch.cuda.empty_cache() after {context}: {e}")
+
+
 def _model_supports_system_role(tokenizer):
     """Check if the model's chat template supports the system role."""
     try:
@@ -65,18 +75,27 @@ def _model_supports_system_role(tokenizer):
 
 def _run_hflm_eval(model, tokenizer, tasks, system_instruction, device):
     """Run evaluation using HuggingFace LM backend."""
-    hflm_model = HFLM(pretrained=model, tokenizer=tokenizer, batch_size="auto", dtype="bfloat16")
-    results = simple_evaluate(
-        model=hflm_model,
-        tasks=tasks,
-        apply_chat_template=True,
-        system_instruction=system_instruction,
-        batch_size="auto",
-        check_integrity=False,
-        device=device,
-    )
-    del hflm_model
-    return results
+    hflm_model = None
+    try:
+        # Avoid auto batch-size probing, which can be fragile after heavy GPU kernels.
+        hflm_model = HFLM(pretrained=model, tokenizer=tokenizer, batch_size=1, dtype="bfloat16")
+        results = simple_evaluate(
+            model=hflm_model,
+            tasks=tasks,
+            apply_chat_template=True,
+            system_instruction=system_instruction,
+            batch_size=1,
+            check_integrity=False,
+            device=device,
+        )
+        return results
+    except Exception as e:
+        log.warning(f"HFLM evaluation failed: {e}. Returning no results for tasks: {tasks}")
+        _safe_empty_cuda_cache("HFLM evaluation failure")
+        return None
+    finally:
+        if hflm_model is not None:
+            del hflm_model
 
 
 def _run_vllm_eval(model, tokenizer, tasks, system_instruction, device):
@@ -95,8 +114,7 @@ def _run_vllm_eval(model, tokenizer, tasks, system_instruction, device):
 
         # Free some memory before vLLM loads weights from disk.
         # Do not call model.cpu()/model.to() when accelerate dispatch is active.
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        _safe_empty_cuda_cache("saving model before vLLM load")
 
         log.info(f"Loading model in vLLM for generative tasks: {tasks}")
         vllm_model = VLLM(
@@ -116,11 +134,11 @@ def _run_vllm_eval(model, tokenizer, tasks, system_instruction, device):
             check_integrity=False,
         )
         del vllm_model
-        torch.cuda.empty_cache()
+        _safe_empty_cuda_cache("vLLM evaluation")
         return results
     except Exception as e:
         log.warning(f"vLLM evaluation failed: {e}. Falling back to HFLM from saved checkpoint.")
-        torch.cuda.empty_cache()
+        _safe_empty_cuda_cache("vLLM failure")
         # Load from the saved tmpdir — do NOT pass the in-memory quantized
         # model because compressed-tensors replaces .weight with quantized
         # tensors that break vanilla F.linear after a cpu/gpu transfer.
@@ -129,23 +147,22 @@ def _run_vllm_eval(model, tokenizer, tasks, system_instruction, device):
                 pretrained=tmpdir,
                 tokenizer=tokenizer,
                 dtype="bfloat16",
-                batch_size="auto",
+                batch_size=1,
             )
             results = simple_evaluate(
                 model=hflm_model,
                 tasks=tasks,
                 apply_chat_template=True,
                 system_instruction=system_instruction,
+                batch_size=1,
                 check_integrity=False,
             )
             del hflm_model
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            _safe_empty_cuda_cache("HFLM fallback")
             return results
         except Exception as e2:
             log.warning(f"HFLM fallback also failed: {e2}. Giving up on generative tasks.")
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            _safe_empty_cuda_cache("HFLM fallback failure")
             return None
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)

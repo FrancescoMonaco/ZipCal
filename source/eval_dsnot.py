@@ -20,6 +20,10 @@ from cola.sample_selection import select_samples
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "2SSP"))
 from src.pruning import two_stage_2ssp
 
+# Add DSnoT to sys.path
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "calibration_data"))
+from DSnoT.lib.data import get_loaders as dsnot_get_loaders
+
 from data import get_dataset, get_text_from_item
 from similarity_check import prepare_calibration
 from eval import evaluate_model
@@ -138,6 +142,7 @@ def main():
         nargs="+",
         choices=[
             "cola",
+            "dsnot",
             "most_similar",
             "random",
             "decoupled",
@@ -149,7 +154,7 @@ def main():
             "zipf",
             "unique_tokens",
         ],
-        default=["cola"],
+        default=["dsnot"],
         help="Types of pruning to perform",
     )
     parser.add_argument(
@@ -159,7 +164,7 @@ def main():
     parser.add_argument(
         "--output_csv",
         type=str,
-        default="results/cola_experiment_results.csv",
+        default="results/dsnot_experiment_results.csv",
         help="Output CSV file",
     )
     parser.add_argument(
@@ -292,6 +297,36 @@ def main():
                         "attention_mask": encoded["attention_mask"].squeeze(0),
                     }
                 )
+        elif p_type == "dsnot":
+            log.info("Using DSnoT sampling...")
+            
+            # Since DSnoT has its own loader inside get_loaders based on dataset names,
+            # and may load a separate dataset internally, we can either pass the dataset name
+            # or custom selfgen path.
+            # We loop over the datasets in args.datasets and gather dsnot sampled data for each
+            calibration_data = []
+            samples_per_dataset = max(1, args.nsamples // len(args.datasets))
+            
+            for d_name in args.datasets:
+                # Some local mapped names (like 'wmt14') might need mapping for standard loading,
+                # but the generic HF dataset block will attempt to load it.
+                trainloader, valenc = dsnot_get_loaders(
+                    name=d_name,
+                    nsamples=samples_per_dataset,
+                    seed=0,
+                    seqlen=args.max_seq_len,
+                    tokenizer=tokenizer,
+                    data_path=None
+                )
+                for (inp, tar) in trainloader:
+                    calibration_data.append({
+                        "input_ids": inp.squeeze(0),
+                        "attention_mask": torch.ones_like(inp.squeeze(0))
+                    })
+            
+            # If we need exactly args.nsamples, we can trim or pad
+            if len(calibration_data) > args.nsamples:
+                calibration_data = calibration_data[:args.nsamples]
         elif p_type == "random":
             import random
 

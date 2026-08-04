@@ -214,7 +214,7 @@ def main():
             "arc_easy",
             "openbookqa",
             "anli_r1",
-            "gsm8k",
+            #"gsm8k",
             "mmlu",
         ],
         help="Tasks for evaluation (lm_eval names)",
@@ -259,6 +259,12 @@ def main():
         help="Output CSV file",
     )
     parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducibility"
+    )
+    parser.add_argument(
         "--save_models", action="store_true", help="Save pruned models to disk"
     )
     parser.add_argument(
@@ -270,6 +276,12 @@ def main():
 
     args = parser.parse_args()
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    import numpy as np
+    import random
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
 
     # 0. Early exit if all requested experiments already exist in the CSV
     calib_name = "_".join(args.datasets)

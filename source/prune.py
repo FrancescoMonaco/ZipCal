@@ -111,6 +111,11 @@ if __name__ == "__main__":
         default=128,
         help="Number of samples to use for calibration",
     )
+    parser.add_argument(
+        "--run_pruning",
+        action="store_true",
+        help="If set, continue past analysis and run pruning/oneshot",
+    )
     args = parser.parse_args()
     pruning_type = args.pruning_type
     model_name = args.model
@@ -249,8 +254,10 @@ if __name__ == "__main__":
 
     wanda_analyzer.plot(save_path=save_path)
     wanda_analyzer.remove_hooks()
-    # TODO continue and save the pruned model's weights
-    exit(0)
+    # If not explicitly requested, stop after analysis/plots
+    if not args.run_pruning:
+        # TODO continue and save the pruned model's weights when --run_pruning is set
+        exit(0)
     # Define Wanda recipe
     recipe = WandaPruningModifier(sparsity=0.5, mask_structure="0:0", targets="__ALL__")
 

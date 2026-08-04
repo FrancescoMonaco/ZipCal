@@ -334,8 +334,8 @@ def reorganize_results(csv_path, cola_csv_path):
 
 if __name__ == "__main__":
     reorganize_results(
-        "results/multidataset_results.csv",
-        "results/cola_experiment_results_multidataset.csv",
-        #"results/experiment_results_new.csv",
-        #"results/cola_results_new.csv",
+        #"results/multidataset_results.csv",
+        #"results/cola_experiment_results_multidataset.csv",
+        "results/experiment_results_new.csv",
+        "results/cola_results_new.csv",
     )

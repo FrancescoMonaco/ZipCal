@@ -236,7 +236,7 @@ def main():
             model=st_model,
             dataloader=current_tokenized_data,
             nsamples=args.nsamples,
-            type="random_words", # This triggers the unique token logic in prepare_calibration
+            type="words_dataset", # This triggers the unique token logic in prepare_calibration
             tokenizer=tokenizer,
             dataset_name=d_name,
             model_name=args.model.replace("/", "-")

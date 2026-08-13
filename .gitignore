@@ -88,3 +88,5 @@ temp/
 *.pdf
 *.csv
 *.lock
+*.out
+results/reorganized/

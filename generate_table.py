@@ -39,8 +39,8 @@ import pandas as pd
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 SCRIPT_DIR    = Path(__file__).resolve().parent
-COLA_CSV      = SCRIPT_DIR / "results" / "cola_experiments_multilingual.csv"
-EXP_CSV       = SCRIPT_DIR / "results" / "experiments_multilingual.csv"
+COLA_CSV      = SCRIPT_DIR / "results" / "cola_experiments_cut.csv"
+EXP_CSV       = SCRIPT_DIR / "results" / "experiment_results_cut.csv"
 COLA_2SSP_CSV = SCRIPT_DIR / "results" / "2ssp_cola_experiment_results.csv"
 EXP_2SSP_CSV  = SCRIPT_DIR / "results" / "2ssp_experiment_results.csv"
 
@@ -54,45 +54,45 @@ TASKS_WITH_NORM = {"arc_challenge", "arc_easy", "hellaswag", "openbookqa"}
 
 # Evaluation tasks (rows)
 EVAL_TASKS = [
-    # "arc_challenge", "arc_easy", "boolq", "hellaswag",
-    # "winogrande", "gsm8k", "mmlu", "openbookqa", "rte", "anli_r1",
-    "global_mmlu_es", "global_mmlu_zh", "xquad_es", "xquad_zh",
-    "xnli_es", "xnli_zh", "xwinograd_zh",
-    "xcopa_zh",
+    "arc_challenge", "arc_easy", "boolq", "hellaswag",
+    "winogrande", "gsm8k", "mmlu", "openbookqa", "rte", "anli_r1",
+    # "global_mmlu_es", "global_mmlu_zh", "xquad_es", "xquad_zh",
+    # "xnli_es", "xnli_zh", "xwinograd_zh",
+    # "xcopa_zh",
 ]
 
 TASK_DISPLAY = {
-    # "arc_challenge": "ARC-C",
-    # "arc_easy":      "ARC-E",
-    # "boolq":         "BoolQ",
-    # "hellaswag":     "HellaSwag",
-    # "winogrande":    "WinoGr.",
-    # "gsm8k":         "GSM8k",
-    # "mmlu":          "MMLU",
-    # "openbookqa":    "OBQA",
-    # "rte":           "RTE",
-    # "anli_r1":       "ANLI",
-    "global_mmlu_es":     "MMLU-ES",
-    "global_mmlu_zh":     "MMLU-ZH",
-    "xquad_es":          "XQuAD-ES",
-    "xquad_zh":          "XQuAD-ZH",
-    "xnli_es":           "XNLI-ES",
-    "xnli_zh":           "XNLI-ZH",
-    "xwinograd_zh":       "XWino-ZH",
-    "xcopa_zh":          "XCOPA-ZH",
+    "arc_challenge": "ARC-C",
+    "arc_easy":      "ARC-E",
+    "boolq":         "BoolQ",
+    "hellaswag":     "HellaSwag",
+    "winogrande":    "WinoGr.",
+    "gsm8k":         "GSM8k",
+    "mmlu":          "MMLU",
+    "openbookqa":    "OBQA",
+    "rte":           "RTE",
+    "anli_r1":       "ANLI",
+    # "global_mmlu_es":     "MMLU-ES",
+    # "global_mmlu_zh":     "MMLU-ZH",
+    # "xquad_es":          "XQuAD-ES",
+    # "xquad_zh":          "XQuAD-ZH",
+    # "xnli_es":           "XNLI-ES",
+    # "xnli_zh":           "XNLI-ZH",
+    # "xwinograd_zh":       "XWino-ZH",
+    # "xcopa_zh":          "XCOPA-ZH",
 }
 
 # Calibration-dataset groups (columns)
 CALIB_GROUPS = OrderedDict([
-    # ("(i)",   ["wikitext", "c4", "pile"]),
-    # ("(ii)",  ["gsm8k", "svamp"]),
-    # ("(iii)", ["winogrande", "openbookqa"]),
-    # ("(iv)",  ["rte", "anli_r1"]),
-    # ("(v)",   ["mmlu", "wmt14"]),
+    ("(i)",   ["wikitext", "c4", "pile"]),
+    ("(ii)",  ["gsm8k", "svamp"]),
+    ("(iii)", ["winogrande", "openbookqa"]),
+    ("(iv)",  ["rte", "anli_r1"]),
+    ("(v)",   ["mmlu", "wmt14"]),
     # Multilingual Splits
-    ("(Know-es)", ["global_mmlu_es", "xnli_es", "xquad_es"]),
-    ("(Know-zh)", ["global_mmlu_zh", "xnli_zh", "xquad_zh"]),
-    ("(Comm-zh)", ["xwinograd_zh", "xcopa_zh"]),
+    # ("(Know-es)", ["global_mmlu_es", "xnli_es", "xquad_es"]),
+    # ("(Know-zh)", ["global_mmlu_zh", "xnli_zh", "xquad_zh"]),
+    # ("(Comm-zh)", ["xwinograd_zh", "xcopa_zh"]),
 ])
 N_GROUPS = len(CALIB_GROUPS)
 
@@ -106,6 +106,24 @@ def _metric_for(task: str) -> str:
     return METRIC_ACC_NORM if task in TASKS_WITH_NORM else METRIC_ACC
 
 
+def _metric_candidates(task: str) -> list:
+    if task == "gsm8k":
+        return ["exact_match,flexible-extract", "exact_match,strict-match"]
+    if task in {"xquad_es", "xquad_zh"}:
+        return ["f1,none", "exact_match,none"]
+    if task in TASKS_WITH_NORM:
+        return ["acc_norm,none", "acc,none"]
+    return ["acc,none", "acc_norm,none"]
+
+
+def _choose_metric(df: pd.DataFrame, base_mask: pd.Series, candidates: list) -> str | None:
+    available = df.loc[base_mask, "metric"].dropna().unique().tolist()
+    for m in candidates:
+        if m in available:
+            return m
+    return None
+
+
 def _escape(s: str) -> str:
     for ch in ("%", "#", "$"):
         s = s.replace(ch, "\\" + ch)
@@ -113,12 +131,17 @@ def _escape(s: str) -> str:
     return s
 
 
-def _fmt(v, pct: bool = False) -> str:
+def _fmt(v, pct: bool = False, std: float = None) -> str:
     if v is None or (isinstance(v, float) and math.isnan(v)):
         return "--"
-    if pct:
-        return f"{v:.1f}"
-    return f"{v:.4f}"
+    
+    val_str = f"{v:.1f}" if pct else f"{v:.4f}"
+    
+    if std is not None and not math.isnan(std) and std > 0:
+        std_str = f"{std:.1f}" if pct else f"{std:.4f}"
+        return f"{val_str} \\pm {std_str}"
+    
+    return val_str
 
 
 def _ulc(formatted: str, rank: int) -> str:
@@ -129,16 +152,19 @@ def _ulc(formatted: str, rank: int) -> str:
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 
-def _dense_values(exp_df: pd.DataFrame, model: str) -> dict:
+def _dense_values(exp_df: pd.DataFrame, model: str, warnings: set) -> dict:
     """Original (dense) score per evaluation task."""
     out = {}
     for task in EVAL_TASKS:
-        metric = _metric_for(task)
-        rows = exp_df.loc[
-            (exp_df["model"] == model)
-            & (exp_df["task"] == task)
-            & (exp_df["metric"] == metric)
-        ]
+        base_mask = (exp_df["model"] == model) & (exp_df["task"] == task)
+        metric = _choose_metric(exp_df, base_mask, _metric_candidates(task))
+        if metric is None:
+            warnings.add(f"[Dense] Missing metric for {model} {task}")
+            out[task] = float("nan")
+            continue
+        rows = exp_df.loc[base_mask & (exp_df["metric"] == metric)]
+        if rows.empty:
+            warnings.add(f"[Dense] Missing rows for {model} {task} metric={metric}")
         out[task] = float(rows["original_value"].iloc[0]) if not rows.empty else float("nan")
     return out
 
@@ -148,19 +174,35 @@ def _cola_values(
     model: str,
     compression_type: str,
     calib_datasets: list,
-) -> dict:
-    """COLA score per eval task, averaged over *calib_datasets*."""
+    warnings: set,
+) -> tuple:
+    """COLA score per eval task, averaged over *calib_datasets*.
+    Returns a dict mapping task to (mean, std)."""
     out = {}
     for task in EVAL_TASKS:
-        metric = _metric_for(task)
-        rows = cola_df.loc[
+        base_mask = (
             (cola_df["model"] == model)
             & (cola_df["task"] == task)
-            & (cola_df["metric"] == metric)
             & (cola_df["pruning_type"] == compression_type)
+        )
+        metric = _choose_metric(cola_df, base_mask, _metric_candidates(task))
+        if metric is None:
+            warnings.add(f"[COLA] Missing metric for {model} {task} pruning_type={compression_type}")
+            out[task] = (float("nan"), float("nan"))
+            continue
+        rows = cola_df.loc[
+            base_mask
+            & (cola_df["metric"] == metric)
             & (cola_df["datasets"].isin(calib_datasets))
         ]
-        out[task] = float(rows["value"].mean()) if not rows.empty else float("nan")
+        
+        if not rows.empty:
+            out[task] = (float(rows["value"].mean()), float(rows["value"].std(ddof=1)) if len(rows) > 1 else 0.0)
+        else:
+            warnings.add(
+                f"[COLA] Missing rows for {model} {task} metric={metric} datasets={','.join(calib_datasets)}"
+            )
+            out[task] = (float("nan"), float("nan"))
     return out
 
 
@@ -170,20 +212,38 @@ def _exp_values(
     compression_type: str,
     pruning_type: str,
     calib_datasets: list,
-) -> dict:
-    """Our-method score per eval task, averaged over *calib_datasets*."""
+    warnings: set,
+) -> tuple:
+    """Our-method score per eval task, averaged over *calib_datasets*.
+    Returns a dict mapping task to (mean, std)."""
     out = {}
     for task in EVAL_TASKS:
-        metric = _metric_for(task)
-        rows = exp_df.loc[
+        base_mask = (
             (exp_df["model"] == model)
             & (exp_df["task"] == task)
-            & (exp_df["metric"] == metric)
             & (exp_df["compression_type"] == compression_type)
             & (exp_df["pruning_type"] == pruning_type)
+        )
+        metric = _choose_metric(exp_df, base_mask, _metric_candidates(task))
+        if metric is None:
+            warnings.add(
+                f"[Ours] Missing metric for {model} {task} compression={compression_type} pruning={pruning_type}"
+            )
+            out[task] = (float("nan"), float("nan"))
+            continue
+        rows = exp_df.loc[
+            base_mask
+            & (exp_df["metric"] == metric)
             & (exp_df["calibration_datasets"].isin(calib_datasets))
         ]
-        out[task] = float(rows["pruned_value"].mean()) if not rows.empty else float("nan")
+        
+        if not rows.empty:
+            out[task] = (float(rows["pruned_value"].mean()), float(rows["pruned_value"].std(ddof=1)) if len(rows) > 1 else 0.0)
+        else:
+            warnings.add(
+                f"[Ours] Missing rows for {model} {task} metric={metric} datasets={','.join(calib_datasets)}"
+            )
+            out[task] = (float("nan"), float("nan"))
     return out
 
 
@@ -222,7 +282,7 @@ def _build_latex(
     pruning_type: str,
     cola_df: pd.DataFrame,
     exp_df: pd.DataFrame,
-) -> str:
+) -> tuple:
     """
     Build the swapped table:
       Rows  = eval tasks  (+Mean, +Geo%)   per model
@@ -275,17 +335,19 @@ def _build_latex(
     lines.append(r"\midrule")
 
     # ── Data rows per model ──────────────────────────────────────────────────
+    warnings = set()
+
     for mi, model in enumerate(models):
         model_short = model.split("/")[-1]
-        dense = _dense_values(exp_df, model)
+        dense = _dense_values(exp_df, model, warnings)
 
         # Pre-compute all group-level values for this model
         # cola_grid[group_key][task]  and  ours_grid[group_key][task]
         cola_grid = {}
         ours_grid = {}
         for gk, calib_ds in CALIB_GROUPS.items():
-            cola_grid[gk] = _cola_values(cola_df, model, compression_type, calib_ds)
-            ours_grid[gk] = _exp_values(exp_df, model, compression_type, pruning_type, calib_ds)
+            cola_grid[gk] = _cola_values(cola_df, model, compression_type, calib_ds, warnings)
+            ours_grid[gk] = _exp_values(exp_df, model, compression_type, pruning_type, calib_ds, warnings)
 
         n_task_rows = len(EVAL_TASKS)
         n_all_rows  = n_task_rows + 2  # +Mean +Geo%
@@ -309,8 +371,10 @@ def _build_latex(
             dense_list.append(d_val)
 
             # collect the 5 COLA + 5 Ours values for this task
-            c_vals = [cola_grid[gk][task] for gk in group_keys]
-            o_vals = [ours_grid[gk][task] for gk in group_keys]
+            c_vals = [cola_grid[gk][task][0] for gk in group_keys]
+            o_vals = [ours_grid[gk][task][0] for gk in group_keys]
+            c_stds = [cola_grid[gk][task][1] for gk in group_keys]
+            o_stds = [ours_grid[gk][task][1] for gk in group_keys]
 
             for gk, cv in zip(group_keys, c_vals):
                 col_vals_cola[gk].append(cv)
@@ -325,10 +389,11 @@ def _build_latex(
 
             # ── top-3 among the 10 group values (5 COLA + 5 Ours) ───────────
             all_group_vals = c_vals + o_vals  # length 10
+            all_group_stds = c_stds + o_stds  # length 10
             top3 = _top3_indices(all_group_vals)  # indices 0-9
 
             # Format the 10 values, applying \ulc for top-3
-            all_fmt = [_fmt(v) for v in all_group_vals]
+            all_fmt = [_fmt(v, std=s) for v, s in zip(all_group_vals, all_group_stds)]
             for rank, idx in enumerate(top3):
                 if all_fmt[idx] != "--":
                     all_fmt[idx] = _ulc(all_fmt[idx], rank)
@@ -477,7 +542,7 @@ def _build_latex(
         + "}"
     )
     lines.append(r"\end{table}")
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n", warnings
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -515,12 +580,14 @@ def main() -> None:
     args = parser.parse_args()
 
     # ── load data ─────────────────────────────────────────────────────────────
-    # if args.compression_type == "2ssp":
-    #     cola_df = pd.read_csv(COLA_2SSP_CSV)
-    #     exp_df  = pd.read_csv(EXP_2SSP_CSV)
-    # else:
-    cola_df = pd.read_csv(COLA_CSV)
-    exp_df  = pd.read_csv(EXP_CSV)
+    if args.compression_type == "2ssp":
+        cola_df = pd.read_csv(COLA_CSV)
+        exp_df  = pd.read_csv(EXP_CSV)
+        # cola_df = pd.read_csv(COLA_2SSP_CSV)
+        # exp_df  = pd.read_csv(EXP_2SSP_CSV)
+    else:
+        cola_df = pd.read_csv(COLA_CSV)
+        exp_df  = pd.read_csv(EXP_CSV)
 
     for m in args.model:
         if m not in exp_df["model"].unique():
@@ -529,7 +596,7 @@ def main() -> None:
             print(f"[WARN] Model '{m}' not found in {COLA_CSV.name}", file=sys.stderr)
 
     # ── generate ──────────────────────────────────────────────────────────────
-    tex = _build_latex(args.model, args.compression_type, args.pruning_type, cola_df, exp_df)
+    tex, warnings = _build_latex(args.model, args.compression_type, args.pruning_type, cola_df, exp_df)
 
     # ── write ─────────────────────────────────────────────────────────────────
     out_dir = Path(args.output_dir) if args.output_dir else SCRIPT_DIR / "results" / "tables"
@@ -540,6 +607,37 @@ def main() -> None:
     tex_path = out_dir / f"{stem}.tex"
     tex_path.write_text(tex, encoding="utf-8")
     print(f"LaTeX -> {tex_path}")
+    if warnings:
+        print("\n" + "=" * 80)
+        print("WARNINGS (missing data)")
+        for w in sorted(warnings):
+            print(w)
+
+    # ── calculate and print stats (min, max, median) ──────────────────────────
+    c_sub = cola_df[(cola_df["model"].isin(args.model)) & (cola_df["pruning_type"] == args.compression_type)]
+    e_sub = exp_df[(exp_df["model"].isin(args.model)) & (exp_df["compression_type"] == args.compression_type) & (exp_df["pruning_type"] == args.pruning_type)]
+    
+    print("\n" + "=" * 80)
+    print("--- RAW VALUES MIN/MAX/MEDIAN OVERALL ---")
+    if not c_sub.empty:
+        print(f"COLA -> Min: {c_sub['value'].min():.4f}, Max: {c_sub['value'].max():.4f}, Median: {c_sub['value'].median():.4f}")
+    if not e_sub.empty:
+        print(f"Ours ({args.pruning_type}) -> Min: {e_sub['pruned_value'].min():.4f}, Max: {e_sub['pruned_value'].max():.4f}, Median: {e_sub['pruned_value'].median():.4f}")
+
+    print("\n--- STANDARD DEVIATION MIN/MAX/MEDIAN OVERALL (across seeds) ---")
+    if not c_sub.empty:
+        c_stds = c_sub.groupby(['model', 'task', 'datasets'])['value'].std(ddof=1).dropna()
+        if not c_stds.empty:
+            print(f"COLA -> Min Std: {c_stds.min():.4f}, Max Std: {c_stds.max():.4f}, Median Std: {c_stds.median():.4f}")
+        else:
+            print("COLA -> Not enough seeds to compute std.")
+    
+    if not e_sub.empty:
+        e_stds = e_sub.groupby(['model', 'task', 'calibration_datasets'])['pruned_value'].std(ddof=1).dropna()
+        if not e_stds.empty:
+            print(f"Ours ({args.pruning_type}) -> Min Std: {e_stds.min():.4f}, Max Std: {e_stds.max():.4f}, Median Std: {e_stds.median():.4f}")
+        else:
+            print(f"Ours ({args.pruning_type}) -> Not enough seeds to compute std.")
 
     print("\n" + "=" * 80)
     print(tex)

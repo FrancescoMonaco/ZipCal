@@ -121,7 +121,7 @@ def main():
             "arc_easy",
             "openbookqa",
             "anli_r1",
-            "gsm8k",
+            #"gsm8k",
             "mmlu",
         ],
         help="Tasks for evaluation (lm_eval names)",
@@ -165,7 +165,7 @@ def main():
     parser.add_argument(
         "--max_seq_len",
         type=int,
-        default=128,
+        default=64,
         help="Maximum sequence length for calibration",
     )
     parser.add_argument(

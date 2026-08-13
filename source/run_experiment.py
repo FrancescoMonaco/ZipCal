@@ -206,18 +206,42 @@ def main():
         "--eval_tasks",
         nargs="+",
         default=[
-            "boolq",
-            "rte",
-            "hellaswag",
-            "winogrande",
-            "arc_challenge",
-            "arc_easy",
-            "openbookqa",
-            "anli_r1",
-            #"gsm8k",
-            "mmlu",
+            # "boolq",
+            # "rte",
+            # "hellaswag",
+            # "winogrande",
+            # "arc_challenge",
+            # "arc_easy",
+            # "openbookqa",
+            # "anli_r1",
+            # #"gsm8k",
+            # "mmlu",
+            "alpaca_eval",
         ],
-        help="Tasks for evaluation (lm_eval names)",
+        help="Tasks for evaluation (lm_eval names, plus the special 'alpaca_eval' task)",
+    )
+    parser.add_argument(
+        "--alpaca_eval_annotator_config",
+        type=str,
+        default="weighted_alpaca_eval_gpt4_turbo",
+        help="Annotator (judge) config name for Alpaca Eval, e.g. "
+        "'weighted_alpaca_eval_gpt4_turbo' (OpenAI GPT-4 Turbo API) or a local "
+        "vLLM judge such as 'alpaca_eval_vllm_llama3_70b_fn'.",
+    )
+    parser.add_argument(
+        "--alpaca_eval_judge_model",
+        type=str,
+        default=None,
+        help="Path or HuggingFace id of a LOCAL open-weights judge model run "
+        "in-process via transformers. This avoids needing an OpenAI API key. "
+        "If set, it overrides --alpaca_eval_annotator_config. Example: "
+        "'meta-llama/Meta-Llama-3-8B-Instruct'.",
+    )
+    parser.add_argument(
+        "--alpaca_eval_max_instances",
+        type=int,
+        default=None,
+        help="Cap the number of Alpaca Eval instructions to evaluate (for smoke tests).",
     )
     parser.add_argument(
         "--compression_type",
@@ -255,7 +279,7 @@ def main():
     parser.add_argument(
         "--output_csv",
         type=str,
-        default="results/experiment_results_new.csv",
+        default="results/experiment_results_cut.csv",
         help="Output CSV file",
     )
     parser.add_argument(
@@ -319,7 +343,15 @@ def main():
             trust_remote_code=True,
         )
         log.info(f"Evaluating original model on: {tasks_to_eval}")
-        orig_raw = evaluate_model(args.model, model, tokenizer, tasks_to_eval)
+        orig_raw = evaluate_model(
+            args.model,
+            model,
+            tokenizer,
+            tasks_to_eval,
+            alpaca_eval_annotator_config=args.alpaca_eval_annotator_config,
+            alpaca_eval_judge_model=args.alpaca_eval_judge_model,
+            alpaca_eval_max_instances=args.alpaca_eval_max_instances,
+        )
         new_orig_metrics = process_results(orig_raw)
         orig_metrics = [
             m for m in existing_orig_metrics if _task_in_requests(m["task"], args.eval_tasks)
@@ -333,6 +365,7 @@ def main():
         ]
 
     # Prepare calibration data base (tokenized) once
+    # Truncate all samples to a fixed length (e.g., 128) for consistency across pruning types
     log.info("Preparing base tokenized data for calibration...")
     all_tokenized_datasets = []  # List of lists, one per dataset (for coreset resampling)
     for d_name in args.datasets:
@@ -347,7 +380,7 @@ def main():
             )
         else:
             dataset = raw_dataset
-        tokenized_data = get_tokenized_data(dataset, tokenizer, d_name)
+        tokenized_data = get_tokenized_data(dataset, tokenizer, d_name, max_length=64)
         all_tokenized_datasets.append(tokenized_data)
 
     calibration_type_map = {
@@ -488,7 +521,13 @@ def main():
         # 4. Evaluate pruned model
         log.info(f"Evaluating compressed model ({p_type})...")
         pruned_raw = evaluate_model(
-            args.model, pruned_model, tokenizer, args.eval_tasks
+            args.model,
+            pruned_model,
+            tokenizer,
+            args.eval_tasks,
+            alpaca_eval_annotator_config=args.alpaca_eval_annotator_config,
+            alpaca_eval_judge_model=args.alpaca_eval_judge_model,
+            alpaca_eval_max_instances=args.alpaca_eval_max_instances,
         )
         pruned_metrics = process_results(pruned_raw)
 

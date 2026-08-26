@@ -1,5 +1,17 @@
+<div align="center">
+  
 # Frequency Matters: Fast Model-Agnostic Data Curation for Pruning and Quantization
 [![arXiv](https://img.shields.io/badge/arXiv-2603.16105-b31b1b.svg)](https://arxiv.org/abs/2603.16105)
+![EMNLP26](https://img.shields.io/badge/EMNLP26-8A2BE2)
+
+<p>
+  <a href="https://scholar.google.it/citations?hl=it&user=ftuDAuQAAAAJ">Francesco Pio Monaco</a>, 
+  <a href="https://scholar.google.it/citations?hl=it&user=a2JJRjMAAAAJ">Elia Cunegatti</a>, 
+  <a href="https://scholar.google.it/citations?user=JblQamAAAAAJ">Flavio Vella</a> and 
+  <a href="https://scholar.google.com/citations?user=qSw6YfcAAAAJ">Giovanni Iacca</a>
+</p>
+
+</div>
 
 ## Introduction
 Code for the paper "**Frequency Matters: Fast Model-Agnostic Data Curation for Pruning and Quantization**".
